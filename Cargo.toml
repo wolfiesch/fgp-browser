@@ -2,7 +2,12 @@
 name = "fgp-browser"
 version = "0.1.0"
 edition = "2021"
-description = "FGP daemon for browser automation via Chrome DevTools Protocol"
+description = "FGP daemon for browser automation via Chrome DevTools Protocol - 292x faster than Playwright MCP"
+license = "MIT"
+repository = "https://github.com/wolfiesch/fgp-browser"
+authors = ["Wolfgang Schoenberger"]
+keywords = ["browser", "automation", "chrome", "cdp", "fgp"]
+categories = ["development-tools", "web-programming"]
 
 [[bin]]
 name = "browser-gateway"
@@ -10,7 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 # FGP daemon SDK
-fgp-daemon = { path = "../daemon" }
+fgp-daemon = "0.1"
 
 # Chrome DevTools Protocol
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
