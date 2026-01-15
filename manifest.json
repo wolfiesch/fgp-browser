@@ -1,0 +1,167 @@
+{
+  "name": "browser",
+  "version": "1.0.0",
+  "description": "Fast browser automation via Chrome DevTools Protocol",
+  "protocol": "fgp@1",
+  "author": "Wolfgang Schoenberger",
+  "license": "MIT",
+  "repository": "https://github.com/fast-gateway-protocol/browser",
+  "daemon": {
+    "entrypoint": "./target/release/browser-gateway",
+    "socket": "browser/daemon.sock",
+    "dependencies": []
+  },
+  "methods": [
+    {
+      "name": "browser.open",
+      "description": "Navigate to a URL",
+      "params": [
+        {"name": "url", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.snapshot",
+      "description": "Get ARIA accessibility tree snapshot",
+      "params": [
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.screenshot",
+      "description": "Capture page screenshot",
+      "params": [
+        {"name": "path", "type": "string", "required": true},
+        {"name": "full_page", "type": "boolean", "required": false, "default": false},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.click",
+      "description": "Click an element by selector",
+      "params": [
+        {"name": "selector", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.fill",
+      "description": "Fill an input field",
+      "params": [
+        {"name": "selector", "type": "string", "required": true},
+        {"name": "value", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.press",
+      "description": "Press a key",
+      "params": [
+        {"name": "key", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.select",
+      "description": "Select option in dropdown",
+      "params": [
+        {"name": "selector", "type": "string", "required": true},
+        {"name": "value", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.check",
+      "description": "Check or uncheck a checkbox",
+      "params": [
+        {"name": "selector", "type": "string", "required": true},
+        {"name": "checked", "type": "boolean", "required": false, "default": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.hover",
+      "description": "Hover over an element",
+      "params": [
+        {"name": "selector", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.scroll",
+      "description": "Scroll page or element",
+      "params": [
+        {"name": "direction", "type": "string", "required": false, "default": "down"},
+        {"name": "amount", "type": "integer", "required": false},
+        {"name": "selector", "type": "string", "required": false},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.press_combo",
+      "description": "Press key with modifiers (Ctrl+A, Cmd+C, etc.)",
+      "params": [
+        {"name": "key", "type": "string", "required": true},
+        {"name": "modifiers", "type": "array", "required": false},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.upload",
+      "description": "Upload file to input element",
+      "params": [
+        {"name": "selector", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.state.save",
+      "description": "Save browser state (cookies, localStorage)",
+      "params": [
+        {"name": "name", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.state.load",
+      "description": "Load saved browser state",
+      "params": [
+        {"name": "name", "type": "string", "required": true},
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.state.list",
+      "description": "List saved browser states",
+      "params": []
+    },
+    {
+      "name": "browser.session.new",
+      "description": "Create new isolated browser session",
+      "params": [
+        {"name": "session_id", "type": "string", "required": false}
+      ]
+    },
+    {
+      "name": "browser.session.list",
+      "description": "List active browser sessions",
+      "params": []
+    },
+    {
+      "name": "browser.session.close",
+      "description": "Close a browser session",
+      "params": [
+        {"name": "session_id", "type": "string", "required": true}
+      ]
+    }
+  ],
+  "skills": {
+    "claude-code": {
+      "source": "./skills/claude-code/",
+      "target": "~/.claude/skills/browser-gateway/"
+    }
+  },
+  "auth": null,
+  "platforms": ["darwin", "linux"]
+}
