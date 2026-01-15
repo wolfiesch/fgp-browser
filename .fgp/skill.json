@@ -1,0 +1,228 @@
+{
+  "$schema": "https://fgp.dev/schemas/skill.json",
+  "name": "browser-gateway",
+  "version": "0.1.0",
+  "description": "Fast browser automation via Chrome DevTools Protocol - 292x faster than Playwright MCP",
+  "author": {
+    "name": "Fast Gateway Protocol",
+    "email": "support@fgp.dev"
+  },
+  "repository": "https://github.com/fast-gateway-protocol/browser",
+  "homepage": "https://fgp.dev",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "chrome", "cdp", "playwright"],
+  "category": "browser-automation",
+
+  "binary": {
+    "type": "rust",
+    "cargo_package": "fgp-browser",
+    "build_command": "cargo build --release",
+    "executable": "target/release/browser-gateway"
+  },
+
+  "distribution": {
+    "prebuilt": {
+      "darwin-arm64": "https://github.com/fast-gateway-protocol/browser/releases/download/v${VERSION}/browser-gateway-darwin-arm64",
+      "darwin-x64": "https://github.com/fast-gateway-protocol/browser/releases/download/v${VERSION}/browser-gateway-darwin-x64",
+      "linux-x64": "https://github.com/fast-gateway-protocol/browser/releases/download/v${VERSION}/browser-gateway-linux-x64"
+    },
+    "homebrew": {
+      "tap": "fast-gateway-protocol/fgp",
+      "formula": "browser-gateway"
+    }
+  },
+
+  "daemon": {
+    "name": "browser",
+    "socket_path": "${FGP_HOME}/services/browser/daemon.sock",
+    "pid_file": "${FGP_HOME}/services/browser/daemon.pid",
+    "log_file": "${FGP_HOME}/services/browser/daemon.log",
+    "start_command": ["${SKILL_BIN}", "start"],
+    "stop_command": ["${SKILL_BIN}", "stop"],
+    "health_method": "health"
+  },
+
+  "methods": [
+    {
+      "name": "browser.open",
+      "description": "Navigate to a URL",
+      "params": {
+        "url": { "type": "string", "required": true, "description": "URL to navigate to" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.snapshot",
+      "description": "Get accessibility tree (ARIA snapshot)",
+      "params": {
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.screenshot",
+      "description": "Capture PNG screenshot",
+      "params": {
+        "path": { "type": "string", "description": "Output file path (optional)" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.click",
+      "description": "Click an element by selector",
+      "params": {
+        "selector": { "type": "string", "required": true, "description": "CSS selector or ARIA ref" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.fill",
+      "description": "Fill an input field",
+      "params": {
+        "selector": { "type": "string", "required": true, "description": "CSS selector" },
+        "value": { "type": "string", "required": true, "description": "Value to fill" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.press",
+      "description": "Press a key",
+      "params": {
+        "key": { "type": "string", "required": true, "description": "Key to press (e.g., Enter, Tab)" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.select",
+      "description": "Select a dropdown option",
+      "params": {
+        "selector": { "type": "string", "required": true, "description": "CSS selector" },
+        "value": { "type": "string", "required": true, "description": "Option value" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.check",
+      "description": "Check/uncheck a checkbox",
+      "params": {
+        "selector": { "type": "string", "required": true, "description": "CSS selector" },
+        "checked": { "type": "boolean", "description": "Check state (default: true)" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.hover",
+      "description": "Hover over an element",
+      "params": {
+        "selector": { "type": "string", "required": true, "description": "CSS selector" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.scroll",
+      "description": "Scroll the page or element",
+      "params": {
+        "direction": { "type": "string", "description": "up, down, left, right" },
+        "amount": { "type": "integer", "description": "Pixels to scroll" },
+        "selector": { "type": "string", "description": "Element to scroll (optional)" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.press_combo",
+      "description": "Press key with modifiers (e.g., Ctrl+A)",
+      "params": {
+        "key": { "type": "string", "required": true, "description": "Key to press" },
+        "modifiers": { "type": "array", "description": "Modifiers (ctrl, alt, shift, meta)" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "browser.upload",
+      "description": "Upload a file to an input",
+      "params": {
+        "selector": { "type": "string", "required": true, "description": "File input selector" },
+        "path": { "type": "string", "required": true, "description": "Path to file" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "session.new",
+      "description": "Create a new isolated browser session",
+      "params": {
+        "session_id": { "type": "string", "description": "Custom session ID (optional)" }
+      }
+    },
+    {
+      "name": "session.list",
+      "description": "List active browser sessions",
+      "params": {}
+    },
+    {
+      "name": "session.close",
+      "description": "Close a browser session",
+      "params": {
+        "session_id": { "type": "string", "required": true, "description": "Session ID to close" }
+      }
+    },
+    {
+      "name": "state.save",
+      "description": "Save browser state (cookies, localStorage)",
+      "params": {
+        "name": { "type": "string", "required": true, "description": "State name" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "state.load",
+      "description": "Load saved browser state",
+      "params": {
+        "name": { "type": "string", "required": true, "description": "State name" },
+        "session_id": { "type": "string", "description": "Session ID (optional)" }
+      }
+    },
+    {
+      "name": "state.list",
+      "description": "List saved browser states",
+      "params": {}
+    }
+  ],
+
+  "mcp_bridge": {
+    "enabled": true,
+    "command": "${SKILL_BIN}",
+    "args": ["mcp"],
+    "tools_prefix": "fgp_browser"
+  },
+
+  "requirements": {
+    "chrome": {
+      "type": "browser",
+      "names": ["Google Chrome", "Chromium"],
+      "min_version": "90",
+      "install_hint": "brew install --cask google-chrome"
+    }
+  },
+
+  "exports": {
+    "mcp": {
+      "enabled": true,
+      "tools_prefix": "fgp_browser"
+    },
+    "claude": {
+      "enabled": true,
+      "skill_name": "browser-fgp",
+      "triggers": ["browser", "navigate", "screenshot", "click", "fill", "automation", "web page"],
+      "tools": ["Bash"]
+    },
+    "cursor": {
+      "enabled": true,
+      "server_name": "fgp-browser"
+    },
+    "windsurf": {
+      "enabled": false
+    },
+    "continue_dev": {
+      "enabled": false
+    }
+  }
+}
