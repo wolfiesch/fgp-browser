@@ -4,7 +4,7 @@
 # Uses multi-stage build for minimal image size.
 
 # Stage 1: Build the Rust binary
-FROM rust:1.75-slim-bookworm AS builder
+FROM rust:slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -59,8 +59,8 @@ ENV CHROME_PATH=/usr/bin/chromium
 ENV FGP_SOCKET_DIR=/home/fgp/.fgp/services
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD browser-gateway health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD browser-gateway status || exit 1
 
 # Expose the socket via volume mount (UNIX sockets can't be exposed as ports)
 VOLUME ["/home/fgp/.fgp/services"]
