@@ -5,6 +5,8 @@ edition = "2021"
 description = "FGP daemon for browser automation via Chrome DevTools Protocol - 292x faster than Playwright MCP"
 license = "MIT"
 repository = "https://github.com/fast-gateway-protocol/browser"
+homepage = "https://github.com/fast-gateway-protocol"
+documentation = "https://docs.rs/fgp-browser"
 authors = ["Wolfgang Schoenberger"]
 keywords = ["browser", "automation", "chrome", "cdp", "fgp"]
 categories = ["development-tools", "web-programming"]
@@ -42,3 +44,7 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 libc = "0.2"
 chrono = "0.4"
+
+[[example]]
+name = "quickstart"
+path = "examples/quickstart.rs"

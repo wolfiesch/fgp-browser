@@ -1,5 +1,9 @@
 # FGP Browser Gateway
 
+[![CI](https://github.com/fast-gateway-protocol/browser/actions/workflows/ci.yml/badge.svg)](https://github.com/fast-gateway-protocol/browser/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Crates.io](https://img.shields.io/crates/v/fgp-browser.svg)](https://crates.io/crates/fgp-browser)
+
 Fast browser automation daemon using Chrome DevTools Protocol directly. **292x faster** than Playwright MCP, **2.8x faster** than Vercel's agent-browser.
 
 ## Why?
