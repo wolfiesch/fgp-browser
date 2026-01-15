@@ -48,7 +48,7 @@ fn is_interactive_node(node: &CdpAxNode) -> bool {
         .role
         .as_ref()
         .and_then(|role| role.value.as_ref())
-        .map_or(false, |value| {
+        .is_some_and(|value| {
             let role_str = json_as_str(value).unwrap_or("");
             matches!(
                 role_str,
@@ -96,7 +96,7 @@ fn is_focusable(node: &CdpAxNode) -> bool {
                     && p.value
                         .value
                         .as_ref()
-                        .and_then(|v| json_as_bool(v))
+                        .and_then(json_as_bool)
                         .unwrap_or(false)
             })
         })
@@ -267,7 +267,7 @@ fn convert_node_ref(node: &CdpAxNode, counter: &mut usize) -> AriaNode {
                     && p.value
                         .value
                         .as_ref()
-                        .and_then(|v| json_as_bool(v))
+                        .and_then(json_as_bool)
                         .unwrap_or(false)
             })
         })
@@ -282,7 +282,7 @@ fn convert_node_ref(node: &CdpAxNode, counter: &mut usize) -> AriaNode {
                     && p.value
                         .value
                         .as_ref()
-                        .and_then(|v| json_as_bool(v))
+                        .and_then(json_as_bool)
                         .unwrap_or(false)
             })
         })

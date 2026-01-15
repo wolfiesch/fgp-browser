@@ -41,5 +41,5 @@ fn test_version_command() {
 #[test]
 fn test_crate_compiles() {
     // This test passes if the crate compiles successfully
-    assert!(true);
+    // The existence of this function proves compilation succeeds
 }

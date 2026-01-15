@@ -9,7 +9,7 @@ use fgp_daemon::service::MethodInfo;
 use fgp_daemon::FgpService;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
@@ -75,7 +75,7 @@ impl BrowserService {
 
     async fn get_or_init_client(
         client: &Arc<RwLock<Option<Arc<BrowserClient>>>>,
-        user_data_dir: &PathBuf,
+        user_data_dir: &Path,
         headless: bool,
     ) -> Result<Arc<BrowserClient>> {
         if let Some(existing) = client.read().await.as_ref() {
@@ -84,7 +84,7 @@ impl BrowserService {
 
         let mut client_lock = client.write().await;
         if client_lock.is_none() {
-            let new_client = BrowserClient::new(user_data_dir.clone(), headless).await?;
+            let new_client = BrowserClient::new(user_data_dir.to_path_buf(), headless).await?;
             *client_lock = Some(Arc::new(new_client));
         }
 

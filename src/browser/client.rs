@@ -735,7 +735,7 @@ impl BrowserClient {
                         })
                         .collect();
 
-                    headless_dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                    headless_dirs.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
                     for dir in headless_dirs {
                         let binary = dir.path().join(subdir_name).join("chrome-headless-shell");
