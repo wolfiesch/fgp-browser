@@ -1,10 +1,10 @@
 {
   "$schema": "https://fgp.dev/schemas/skill.json",
   "name": "browser-gateway",
-  "version": "0.1.0",
-  "description": "Fast browser automation via Chrome DevTools Protocol - 292x faster than Playwright MCP",
+  "version": "1.0.0",
+  "description": "Fast, high-performance browser automation via Chrome DevTools Protocol",
   "author": {
-    "name": "Fast Gateway Protocol",
+    "name": "Wolfgang Schoenberger",
     "email": "support@fgp.dev"
   },
   "repository": "https://github.com/fast-gateway-protocol/browser",
@@ -44,6 +44,11 @@
 
   "methods": [
     {
+      "name": "health",
+      "description": "Check daemon health status",
+      "params": {}
+    },
+    {
       "name": "browser.open",
       "description": "Navigate to a URL",
       "params": {
@@ -62,7 +67,8 @@
       "name": "browser.screenshot",
       "description": "Capture PNG screenshot",
       "params": {
-        "path": { "type": "string", "description": "Output file path (optional)" },
+        "path": { "type": "string", "required": true, "description": "Output file path" },
+        "full_page": { "type": "boolean", "description": "Capture full scrollable page (default: false)" },
         "session_id": { "type": "string", "description": "Session ID (optional)" }
       }
     },
@@ -121,7 +127,7 @@
       "name": "browser.scroll",
       "description": "Scroll the page or element",
       "params": {
-        "direction": { "type": "string", "description": "up, down, left, right" },
+        "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction (default: down)" },
         "amount": { "type": "integer", "description": "Pixels to scroll" },
         "selector": { "type": "string", "description": "Element to scroll (optional)" },
         "session_id": { "type": "string", "description": "Session ID (optional)" }
@@ -132,40 +138,44 @@
       "description": "Press key with modifiers (e.g., Ctrl+A)",
       "params": {
         "key": { "type": "string", "required": true, "description": "Key to press" },
-        "modifiers": { "type": "array", "description": "Modifiers (ctrl, alt, shift, meta)" },
+        "modifiers": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["ctrl", "alt", "shift", "meta"] },
+          "description": "Modifier keys"
+        },
         "session_id": { "type": "string", "description": "Session ID (optional)" }
       }
     },
     {
       "name": "browser.upload",
-      "description": "Upload a file to an input",
+      "description": "Upload a file to an input element",
       "params": {
         "selector": { "type": "string", "required": true, "description": "File input selector" },
-        "path": { "type": "string", "required": true, "description": "Path to file" },
+        "path": { "type": "string", "required": true, "description": "Path to file to upload" },
         "session_id": { "type": "string", "description": "Session ID (optional)" }
       }
     },
     {
-      "name": "session.new",
+      "name": "browser.session.new",
       "description": "Create a new isolated browser session",
       "params": {
         "session_id": { "type": "string", "description": "Custom session ID (optional)" }
       }
     },
     {
-      "name": "session.list",
+      "name": "browser.session.list",
       "description": "List active browser sessions",
       "params": {}
     },
     {
-      "name": "session.close",
+      "name": "browser.session.close",
       "description": "Close a browser session",
       "params": {
         "session_id": { "type": "string", "required": true, "description": "Session ID to close" }
       }
     },
     {
-      "name": "state.save",
+      "name": "browser.state.save",
       "description": "Save browser state (cookies, localStorage)",
       "params": {
         "name": { "type": "string", "required": true, "description": "State name" },
@@ -173,7 +183,7 @@
       }
     },
     {
-      "name": "state.load",
+      "name": "browser.state.load",
       "description": "Load saved browser state",
       "params": {
         "name": { "type": "string", "required": true, "description": "State name" },
@@ -181,18 +191,11 @@
       }
     },
     {
-      "name": "state.list",
+      "name": "browser.state.list",
       "description": "List saved browser states",
       "params": {}
     }
   ],
-
-  "mcp_bridge": {
-    "enabled": true,
-    "command": "${SKILL_BIN}",
-    "args": ["mcp"],
-    "tools_prefix": "fgp_browser"
-  },
 
   "requirements": {
     "chrome": {
@@ -206,13 +209,14 @@
   "exports": {
     "mcp": {
       "enabled": true,
+      "command": "${SKILL_BIN}",
+      "args": ["mcp"],
       "tools_prefix": "fgp_browser"
     },
     "claude": {
       "enabled": true,
       "skill_name": "browser-fgp",
-      "triggers": ["browser", "navigate", "screenshot", "click", "fill", "automation", "web page"],
-      "tools": ["Bash"]
+      "triggers": ["browser", "navigate", "screenshot", "click", "fill", "automation", "web page"]
     },
     "cursor": {
       "enabled": true,
