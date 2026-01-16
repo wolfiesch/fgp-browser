@@ -48,6 +48,12 @@ enum Commands {
         /// Use system Chrome instead of bundled Chromium
         #[arg(long)]
         channel: Option<String>,
+
+        /// Connect to existing Chrome instance (e.g., "http://localhost:9222")
+        /// Use this to access your logged-in sessions. Start Chrome with:
+        /// /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+        #[arg(long)]
+        connect: Option<String>,
     },
 
     /// Stop the browser daemon
@@ -295,7 +301,8 @@ fn main() -> Result<()> {
             foreground,
             headed,
             channel: _,
-        } => cmd_start(socket, foreground, !headed),
+            connect,
+        } => cmd_start(socket, foreground, !headed, connect),
         Commands::Stop { socket } => cmd_stop(socket),
         Commands::Status { socket } => cmd_status(socket),
         Commands::Open {
@@ -469,7 +476,7 @@ fn main() -> Result<()> {
     }
 }
 
-fn cmd_start(socket: String, foreground: bool, headless: bool) -> Result<()> {
+fn cmd_start(socket: String, foreground: bool, headless: bool, connect: Option<String>) -> Result<()> {
     let socket_path = shellexpand::tilde(&socket).to_string();
 
     // Create parent directory
@@ -481,14 +488,28 @@ fn cmd_start(socket: String, foreground: bool, headless: bool) -> Result<()> {
 
     println!("Starting browser-gateway daemon...");
     println!("Socket: {}", socket_path);
-    println!("Mode: {}", if headless { "headless" } else { "headed" });
+
+    if let Some(ref url) = connect {
+        println!("Mode: CONNECT (attaching to user's Chrome at {})", url);
+    } else {
+        println!("Mode: {}", if headless { "headless" } else { "headed" });
+    }
+
+    // Helper to create the service based on mode
+    let create_service = |connect_url: &Option<String>| -> Result<BrowserService> {
+        if let Some(url) = connect_url {
+            BrowserService::new_connect(url)
+        } else {
+            BrowserService::new(headless)
+        }
+    };
 
     if foreground {
         tracing_subscriber::fmt()
             .with_env_filter("fgp_browser=debug,fgp_daemon=debug,chromiumoxide=warn")
             .init();
 
-        let service = BrowserService::new(headless).context("Failed to create BrowserService")?;
+        let service = create_service(&connect).context("Failed to create BrowserService")?;
         let server =
             FgpServer::new(service, &socket_path).context("Failed to create FGP server")?;
         server.serve().context("Server error")?;
@@ -505,8 +526,7 @@ fn cmd_start(socket: String, foreground: bool, headless: bool) -> Result<()> {
                     .with_env_filter("fgp_browser=debug,fgp_daemon=debug,chromiumoxide=warn")
                     .init();
 
-                let service =
-                    BrowserService::new(headless).context("Failed to create BrowserService")?;
+                let service = create_service(&connect).context("Failed to create BrowserService")?;
                 let server =
                     FgpServer::new(service, &socket_path).context("Failed to create FGP server")?;
                 server.serve().context("Server error")?;

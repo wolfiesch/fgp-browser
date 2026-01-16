@@ -3,7 +3,13 @@
 //! Supports session-based browser automation for parallel requests.
 //! Each session has isolated context (cookies, localStorage, cache).
 //!
+//! # Connection Modes
+//!
+//! - **Launch mode** (`new()`): Spawns a new Chrome instance with isolated profile
+//! - **Connect mode** (`new_connect()`): Attaches to existing Chrome with user's sessions
+//!
 //! # CHANGELOG (recent first, max 5 entries)
+//! 01/15/2026 - Added connect mode for user's Chrome sessions (Claude)
 //! 01/15/2026 - Added rich JSON Schema definitions for all methods (Claude)
 //! 01/14/2026 - Initial implementation (Claude)
 
@@ -30,6 +36,8 @@ pub struct BrowserService {
     user_data_dir: PathBuf,
     auth_dir: PathBuf,
     headless: bool,
+    /// If Some, connect to existing Chrome instead of launching
+    connect_url: Option<String>,
 }
 
 impl BrowserService {
@@ -64,6 +72,48 @@ impl BrowserService {
             user_data_dir,
             auth_dir,
             headless,
+            connect_url: None,
+        })
+    }
+
+    /// Create a browser service that connects to user's existing Chrome.
+    ///
+    /// This mode attaches to a Chrome instance running with `--remote-debugging-port`.
+    /// All user sessions, cookies, and localStorage are preserved.
+    ///
+    /// # Arguments
+    /// * `connect_url` - Chrome debugging URL (e.g., "http://localhost:9222")
+    pub fn new_connect(connect_url: &str) -> Result<Self> {
+        let runtime = Runtime::new().context("Failed to create tokio runtime")?;
+
+        let base_dir = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".fgp")
+            .join("services")
+            .join("browser");
+
+        let user_data_dir = base_dir.join("user-data");
+        let auth_dir = base_dir.join("auth");
+
+        // Create directories (for auth state storage)
+        std::fs::create_dir_all(&auth_dir)?;
+
+        // Connect to existing Chrome
+        let url = connect_url.to_string();
+        let client = runtime.block_on(async {
+            tracing::info!("Connecting to user's Chrome at: {}", url);
+            BrowserClient::connect(&url).await
+        })?;
+
+        tracing::info!("Connected to user's Chrome - sessions available!");
+
+        Ok(Self {
+            runtime,
+            client: Arc::new(RwLock::new(Some(Arc::new(client)))),
+            user_data_dir,
+            auth_dir,
+            headless: false, // User's browser is always headed
+            connect_url: Some(connect_url.to_string()),
         })
     }
 
@@ -83,6 +133,7 @@ impl BrowserService {
         client: &Arc<RwLock<Option<Arc<BrowserClient>>>>,
         user_data_dir: &Path,
         headless: bool,
+        connect_url: Option<&str>,
     ) -> Result<Arc<BrowserClient>> {
         if let Some(existing) = client.read().await.as_ref() {
             return Ok(Arc::clone(existing));
@@ -90,7 +141,13 @@ impl BrowserService {
 
         let mut client_lock = client.write().await;
         if client_lock.is_none() {
-            let new_client = BrowserClient::new(user_data_dir.to_path_buf(), headless).await?;
+            let new_client = if let Some(url) = connect_url {
+                // Connect mode: attach to existing Chrome
+                BrowserClient::connect(url).await?
+            } else {
+                // Launch mode: spawn new Chrome
+                BrowserClient::new(user_data_dir.to_path_buf(), headless).await?
+            };
             *client_lock = Some(Arc::new(new_client));
         }
 
@@ -110,10 +167,11 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
 
         let result = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.navigate(url, session_id.as_deref()).await
         })?;
 
@@ -125,10 +183,11 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
 
         let result = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.snapshot(session_id.as_deref()).await
         })?;
 
@@ -142,10 +201,11 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
 
         let result = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.screenshot(path, session_id.as_deref()).await
         })?;
 
@@ -162,11 +222,12 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.to_string();
 
         let result = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.click(&selector, session_id.as_deref()).await
         })?;
 
@@ -187,12 +248,13 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.to_string();
         let value = value.to_string();
 
         let result = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client
                 .fill(&selector, &value, session_id.as_deref())
                 .await
@@ -211,11 +273,12 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let key = key.to_string();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.press(&key, session_id.as_deref()).await
         })?;
 
@@ -233,10 +296,11 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
 
         let state = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             let cookies = browser_client.get_cookies(session_id.as_deref()).await?;
             let local_storage = browser_client
                 .get_local_storage(session_id.as_deref())
@@ -276,10 +340,11 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client
                 .set_cookies(&state.cookies, session_id.as_deref())
                 .await?;
@@ -366,10 +431,11 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
 
         let id = self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.create_session(session_id).await
         })?;
 
@@ -438,12 +504,13 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.to_string();
         let value = value.to_string();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client
                 .select(&selector, &value, session_id.as_deref())
                 .await
@@ -470,11 +537,12 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.to_string();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client
                 .check(&selector, checked, session_id.as_deref())
                 .await
@@ -497,11 +565,12 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.to_string();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client.hover(&selector, session_id.as_deref()).await
         })?;
 
@@ -520,11 +589,12 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.map(|s| s.to_string());
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client
                 .scroll(selector.as_deref(), x, y, session_id.as_deref())
                 .await
@@ -556,11 +626,12 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let key = key.to_string();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             let mod_refs: Vec<&str> = modifiers.iter().map(|s| s.as_str()).collect();
             browser_client
                 .press_combo(&mod_refs, &key, session_id.as_deref())
@@ -588,12 +659,13 @@ impl BrowserService {
         let client = self.client.clone();
         let user_data_dir = self.user_data_dir.clone();
         let headless = self.headless;
+        let connect_url = self.connect_url.clone();
         let selector = selector.to_string();
         let path = path.to_string();
 
         self.runtime.block_on(async {
             let browser_client =
-                Self::get_or_init_client(&client, &user_data_dir, headless).await?;
+                Self::get_or_init_client(&client, &user_data_dir, headless, connect_url.as_deref()).await?;
             browser_client
                 .upload(&selector, &path, session_id.as_deref())
                 .await

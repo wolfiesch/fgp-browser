@@ -2,6 +2,14 @@
 //!
 //! Supports multiple concurrent sessions for parallel browser automation.
 //! Each session has isolated context (cookies, localStorage, cache).
+//!
+//! # Connection Modes
+//!
+//! - **Launch mode** (`new()`): Spawns a new Chrome instance with isolated profile
+//! - **Connect mode** (`connect()`): Attaches to existing Chrome with user's sessions
+//!
+//! # CHANGELOG (recent first, max 5 entries)
+//! 01/15/2026 - Added connect() for attaching to user's Chrome (Claude)
 
 use anyhow::{Context, Result};
 use chromiumoxide::browser::{Browser, BrowserConfig};
@@ -107,6 +115,74 @@ impl BrowserClient {
 
         let mut sessions = HashMap::new();
         sessions.insert(default_session_id.clone(), default_session);
+
+        Ok(Self {
+            browser,
+            sessions: Arc::new(RwLock::new(sessions)),
+            default_session_id,
+            user_data_dir,
+        })
+    }
+
+    /// Connect to an existing Chrome instance (user's browser with logins).
+    ///
+    /// This mode attaches to a Chrome instance running with `--remote-debugging-port`.
+    /// The browser retains all user sessions, cookies, and localStorage.
+    ///
+    /// # Arguments
+    /// * `debug_url` - Chrome debugging URL (e.g., "http://localhost:9222")
+    ///
+    /// # Example
+    /// ```bash
+    /// # Start Chrome with debugging:
+    /// /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+    ///
+    /// # Then connect:
+    /// browser-gateway start --connect http://localhost:9222
+    /// ```
+    pub async fn connect(debug_url: &str) -> Result<Self> {
+        tracing::info!("Connecting to existing Chrome at: {}", debug_url);
+
+        let (browser, mut handler) = Browser::connect(debug_url)
+            .await
+            .with_context(|| format!(
+                "Failed to connect to Chrome at {}. \
+                 Make sure Chrome is running with --remote-debugging-port=9222",
+                debug_url
+            ))?;
+
+        // Spawn handler task - just drain events, no logging overhead
+        tokio::spawn(async move { while handler.next().await.is_some() {} });
+
+        // Get existing pages or create a new one
+        let pages = browser.pages().await.context("Failed to list pages")?;
+
+        let default_page = if pages.is_empty() {
+            tracing::info!("No existing pages, creating new tab");
+            browser
+                .new_page("about:blank")
+                .await
+                .context("Failed to create initial page")?
+        } else {
+            // Use the first available page
+            tracing::info!("Found {} existing pages, using first one", pages.len());
+            pages.into_iter().next().unwrap()
+        };
+
+        let default_session_id = "default".to_string();
+        let default_session = BrowserSession {
+            id: default_session_id.clone(),
+            context_id: None, // Uses browser's default context (user's real context!)
+            page: default_page,
+        };
+
+        let mut sessions = HashMap::new();
+        sessions.insert(default_session_id.clone(), default_session);
+
+        // Use a placeholder for user_data_dir since we're connecting to existing browser
+        let user_data_dir = PathBuf::from("/connected-browser");
+
+        tracing::info!("Connected to user's Chrome - all sessions/logins available!");
 
         Ok(Self {
             browser,
