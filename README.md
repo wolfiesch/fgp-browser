@@ -6,6 +6,10 @@
 
 Fast browser automation daemon using Chrome DevTools Protocol directly. **292x faster** than Playwright MCP, **2.8x faster** than Vercel's agent-browser.
 
+## Doctrine
+
+See [DOCTRINE.md](./DOCTRINE.md).
+
 ## Why?
 
 MCP stdio tools spawn a new process for every call (~2.3s overhead). FGP Browser keeps Chrome warm and ready:

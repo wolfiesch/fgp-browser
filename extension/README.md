@@ -205,10 +205,23 @@ Use **both** CDP and Extension based on use case:
 
 ## Status
 
-**Prototype** - Not yet integrated with FGP daemon.
+**Integrated** - Extension bridge is fully integrated with FGP daemon.
 
-Next steps:
-1. Add WebSocket server to FGP daemon (port 9223)
-2. Route extension-capable methods to extension
-3. Fall back to CDP for unsupported methods
-4. Test tab grouping workflow
+Completed:
+1. ✅ WebSocket server added to FGP daemon (port 9223)
+2. ✅ Extension methods routed via WebSocket bridge
+3. ✅ CDP fallback for non-extension methods
+4. ⏳ Tab grouping workflow testing (pending)
+
+### Usage
+
+Start daemon with extension bridge enabled:
+```bash
+browser-gateway start --extension-bridge --foreground
+```
+
+Install extension:
+1. Open Chrome → `chrome://extensions`
+2. Enable "Developer mode"
+3. Click "Load unpacked" → Select `fgp/browser/extension/` directory
+4. Extension popup shows connection status

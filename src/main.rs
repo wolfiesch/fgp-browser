@@ -1,6 +1,8 @@
 //! FGP Browser Gateway - Pure Rust browser automation via CDP.
 //!
 //! # CHANGELOG (recent first, max 5 entries)
+//! 01/15/2026 - Added extension CLI commands (group, cookies, notify) (Claude)
+//! 01/15/2026 - Integrated extension bridge with BrowserService (Claude)
 //! 01/15/2026 - Added extension bridge WebSocket server (Claude)
 //! 01/15/2026 - Added connect mode for user's Chrome (Claude)
 
@@ -240,6 +242,12 @@ enum Commands {
         #[command(subcommand)]
         action: SessionAction,
     },
+
+    /// Chrome extension features (tab groups, cookies, notifications)
+    Extension {
+        #[command(subcommand)]
+        action: ExtensionAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -289,6 +297,53 @@ enum SessionAction {
         /// Session ID to close
         #[arg(long)]
         id: String,
+        #[arg(short, long, default_value = DEFAULT_SOCKET)]
+        socket: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExtensionAction {
+    /// Group tabs together (requires extension)
+    Group {
+        /// Tab IDs to group (comma-separated)
+        #[arg(value_delimiter = ',')]
+        tab_ids: Vec<i32>,
+        /// Title for the tab group
+        #[arg(short, long)]
+        title: Option<String>,
+        /// Color for the tab group
+        #[arg(short, long)]
+        color: Option<String>,
+        #[arg(short, long, default_value = DEFAULT_SOCKET)]
+        socket: String,
+    },
+    /// Ungroup tabs (requires extension)
+    Ungroup {
+        /// Tab IDs to ungroup (comma-separated)
+        #[arg(value_delimiter = ',')]
+        tab_ids: Vec<i32>,
+        #[arg(short, long, default_value = DEFAULT_SOCKET)]
+        socket: String,
+    },
+    /// List tab groups (requires extension)
+    ListGroups {
+        #[arg(short, long, default_value = DEFAULT_SOCKET)]
+        socket: String,
+    },
+    /// Get all cookies for a domain (requires extension)
+    Cookies {
+        /// Domain to get cookies for (e.g., .x.com)
+        domain: String,
+        #[arg(short, long, default_value = DEFAULT_SOCKET)]
+        socket: String,
+    },
+    /// Show a desktop notification (requires extension)
+    Notify {
+        /// Notification title
+        title: String,
+        /// Notification message
+        message: String,
         #[arg(short, long, default_value = DEFAULT_SOCKET)]
         socket: String,
     },
@@ -489,6 +544,51 @@ fn main() -> Result<()> {
                 cli.json,
             ),
         },
+        Commands::Extension { action } => match action {
+            ExtensionAction::Group {
+                tab_ids,
+                title,
+                color,
+                socket,
+            } => {
+                let mut params = serde_json::json!({"tabIds": tab_ids});
+                if let Some(t) = title {
+                    params.as_object_mut().unwrap().insert("title".to_string(), serde_json::json!(t));
+                }
+                if let Some(c) = color {
+                    params.as_object_mut().unwrap().insert("color".to_string(), serde_json::json!(c));
+                }
+                cmd_call_daemon(&socket, "tabs.group", params, cli.json)
+            }
+            ExtensionAction::Ungroup { tab_ids, socket } => cmd_call_daemon(
+                &socket,
+                "tabs.ungroup",
+                serde_json::json!({"tabIds": tab_ids}),
+                cli.json,
+            ),
+            ExtensionAction::ListGroups { socket } => cmd_call_daemon(
+                &socket,
+                "tabGroups.query",
+                serde_json::json!({}),
+                cli.json,
+            ),
+            ExtensionAction::Cookies { domain, socket } => cmd_call_daemon(
+                &socket,
+                "cookies.getAll",
+                serde_json::json!({"domain": domain}),
+                cli.json,
+            ),
+            ExtensionAction::Notify {
+                title,
+                message,
+                socket,
+            } => cmd_call_daemon(
+                &socket,
+                "notifications.create",
+                serde_json::json!({"title": title, "message": message}),
+                cli.json,
+            ),
+        },
     }
 }
 
@@ -522,24 +622,37 @@ fn cmd_start(
         println!("Extension bridge: ws://127.0.0.1:{}", extension_port);
     }
 
-    // Helper to create the service based on mode
-    let create_service = |connect_url: &Option<String>| -> Result<BrowserService> {
-        if let Some(url) = connect_url {
-            BrowserService::new_connect(url)
-        } else {
-            BrowserService::new(headless)
-        }
+    // Create extension bridge if enabled (shared across threads)
+    let bridge: Option<std::sync::Arc<extension_bridge::ExtensionBridge>> = if extension_bridge {
+        Some(std::sync::Arc::new(extension_bridge::ExtensionBridge::new(Some(extension_port))))
+    } else {
+        None
     };
 
-    // Helper to start extension bridge if enabled
-    let start_extension_bridge = |port: u16| {
-        if extension_bridge {
-            let bridge = extension_bridge::ExtensionBridge::new(Some(port));
-            // Start extension bridge in a separate tokio runtime
+    // Helper to create the service based on mode, with optional extension bridge
+    let create_service = |connect_url: &Option<String>, bridge: Option<std::sync::Arc<extension_bridge::ExtensionBridge>>| -> Result<BrowserService> {
+        let service = if let Some(url) = connect_url {
+            BrowserService::new_connect(url)?
+        } else {
+            BrowserService::new(headless)?
+        };
+
+        Ok(if let Some(b) = bridge {
+            service.with_extension_bridge(b)
+        } else {
+            service
+        })
+    };
+
+    // Helper to start extension bridge WebSocket server
+    let start_extension_bridge = |bridge: Option<std::sync::Arc<extension_bridge::ExtensionBridge>>| {
+        if let Some(b) = bridge {
+            let bridge_clone = b.clone();
+            // Start extension bridge in a separate thread with its own tokio runtime
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
                 rt.block_on(async {
-                    if let Err(e) = bridge.start().await {
+                    if let Err(e) = bridge_clone.start().await {
                         tracing::error!("Extension bridge error: {}", e);
                     }
                     // Keep runtime alive
@@ -548,7 +661,7 @@ fn cmd_start(
                     }
                 });
             });
-            tracing::info!("Extension bridge started on port {}", port);
+            tracing::info!("Extension bridge started on port {}", b.port());
         }
     };
 
@@ -557,9 +670,9 @@ fn cmd_start(
             .with_env_filter("fgp_browser=debug,fgp_daemon=debug,chromiumoxide=warn")
             .init();
 
-        start_extension_bridge(extension_port);
+        start_extension_bridge(bridge.clone());
 
-        let service = create_service(&connect).context("Failed to create BrowserService")?;
+        let service = create_service(&connect, bridge).context("Failed to create BrowserService")?;
         let server =
             FgpServer::new(service, &socket_path).context("Failed to create FGP server")?;
         server.serve().context("Server error")?;
@@ -576,9 +689,9 @@ fn cmd_start(
                     .with_env_filter("fgp_browser=debug,fgp_daemon=debug,chromiumoxide=warn")
                     .init();
 
-                start_extension_bridge(extension_port);
+                start_extension_bridge(bridge.clone());
 
-                let service = create_service(&connect).context("Failed to create BrowserService")?;
+                let service = create_service(&connect, bridge).context("Failed to create BrowserService")?;
                 let server =
                     FgpServer::new(service, &socket_path).context("Failed to create FGP server")?;
                 server.serve().context("Server error")?;

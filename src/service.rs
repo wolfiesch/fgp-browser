@@ -9,6 +9,7 @@
 //! - **Connect mode** (`new_connect()`): Attaches to existing Chrome with user's sessions
 //!
 //! # CHANGELOG (recent first, max 5 entries)
+//! 01/15/2026 - Added extension bridge routing for Chrome Extension API methods (Claude)
 //! 01/15/2026 - Added connect mode for user's Chrome sessions (Claude)
 //! 01/15/2026 - Added rich JSON Schema definitions for all methods (Claude)
 //! 01/14/2026 - Initial implementation (Claude)
@@ -27,6 +28,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 
 use crate::browser::BrowserClient;
+use crate::extension_bridge::{is_extension_method, ExtensionBridge};
 use crate::models::*;
 
 /// Browser automation service.
@@ -38,6 +40,8 @@ pub struct BrowserService {
     headless: bool,
     /// If Some, connect to existing Chrome instead of launching
     connect_url: Option<String>,
+    /// Optional extension bridge for Chrome Extension API methods
+    extension_bridge: Option<Arc<ExtensionBridge>>,
 }
 
 impl BrowserService {
@@ -73,7 +77,14 @@ impl BrowserService {
             auth_dir,
             headless,
             connect_url: None,
+            extension_bridge: None,
         })
+    }
+
+    /// Set the extension bridge for routing extension methods
+    pub fn with_extension_bridge(mut self, bridge: Arc<ExtensionBridge>) -> Self {
+        self.extension_bridge = Some(bridge);
+        self
     }
 
     /// Create a browser service that connects to user's existing Chrome.
@@ -114,6 +125,7 @@ impl BrowserService {
             auth_dir,
             headless: false, // User's browser is always headed
             connect_url: Some(connect_url.to_string()),
+            extension_bridge: None,
         })
     }
 
@@ -677,6 +689,33 @@ impl BrowserService {
             "path": path
         }))
     }
+
+    // =========================================================================
+    // EXTENSION BRIDGE ROUTING
+    // =========================================================================
+
+    /// Route extension-specific methods to the Chrome extension via WebSocket.
+    /// Called by dispatch() when the method is an extension-only method.
+    fn dispatch_to_extension(&self, method: &str, params: HashMap<String, Value>) -> Result<Value> {
+        let bridge = self.extension_bridge.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Extension method '{}' requires Chrome extension. \
+                 Start daemon with --extension-bridge and install the FGP extension.",
+                method
+            )
+        })?;
+
+        if !bridge.is_connected_blocking() {
+            anyhow::bail!(
+                "Extension not connected. Install the FGP Browser Bridge extension \
+                 from chrome://extensions and ensure it's enabled."
+            );
+        }
+
+        tracing::debug!("Routing '{}' to Chrome extension", method);
+        let response = bridge.call_blocking(method, params)?;
+        ExtensionBridge::response_to_value(response)
+    }
 }
 
 impl FgpService for BrowserService {
@@ -689,6 +728,11 @@ impl FgpService for BrowserService {
     }
 
     fn dispatch(&self, method: &str, params: HashMap<String, Value>) -> Result<Value> {
+        // Check if this is an extension-only method that should be routed to the Chrome extension
+        if is_extension_method(method) {
+            return self.dispatch_to_extension(method, params);
+        }
+
         match method {
             "health" => self.handle_health(params),
             // Navigation and state
@@ -1189,6 +1233,115 @@ impl FgpService for BrowserService {
                 )
                 .example("Close session", json!({"session_id": "abc123"}))
                 .errors(&["SESSION_NOT_FOUND"]),
+
+            // ================================================================
+            // Extension Methods (requires Chrome extension)
+            // ================================================================
+            MethodInfo::new("tabs.group", "[Extension] Group tabs together")
+                .schema(
+                    SchemaBuilder::object()
+                        .property(
+                            "tabIds",
+                            SchemaBuilder::array()
+                                .items(SchemaBuilder::integer())
+                                .description("Tab IDs to group"),
+                        )
+                        .property(
+                            "groupId",
+                            SchemaBuilder::integer()
+                                .description("Existing group ID to add tabs to (optional)"),
+                        )
+                        .required(&["tabIds"])
+                        .build(),
+                )
+                .returns(
+                    SchemaBuilder::object()
+                        .property("groupId", SchemaBuilder::integer())
+                        .build(),
+                )
+                .example("Group tabs", json!({"tabIds": [1, 2, 3]}))
+                .errors(&["EXTENSION_NOT_CONNECTED"]),
+
+            MethodInfo::new("tabGroups.update", "[Extension] Update tab group properties")
+                .schema(
+                    SchemaBuilder::object()
+                        .property(
+                            "groupId",
+                            SchemaBuilder::integer().description("Tab group ID"),
+                        )
+                        .property(
+                            "title",
+                            SchemaBuilder::string().description("Group title"),
+                        )
+                        .property(
+                            "color",
+                            SchemaBuilder::string()
+                                .enum_values(&["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"])
+                                .description("Group color"),
+                        )
+                        .property(
+                            "collapsed",
+                            SchemaBuilder::boolean().description("Collapse the group"),
+                        )
+                        .required(&["groupId"])
+                        .build(),
+                )
+                .returns(
+                    SchemaBuilder::object()
+                        .property("updated", SchemaBuilder::boolean())
+                        .build(),
+                )
+                .example("Update group", json!({"groupId": 1, "title": "Research", "color": "blue"}))
+                .errors(&["EXTENSION_NOT_CONNECTED", "GROUP_NOT_FOUND"]),
+
+            MethodInfo::new("cookies.getAll", "[Extension] Get all cookies matching criteria")
+                .schema(
+                    SchemaBuilder::object()
+                        .property(
+                            "domain",
+                            SchemaBuilder::string().description("Cookie domain filter"),
+                        )
+                        .property(
+                            "url",
+                            SchemaBuilder::string().format("uri").description("URL to get cookies for"),
+                        )
+                        .build(),
+                )
+                .returns(
+                    SchemaBuilder::array().items(
+                        SchemaBuilder::object()
+                            .property("name", SchemaBuilder::string())
+                            .property("value", SchemaBuilder::string())
+                            .property("domain", SchemaBuilder::string())
+                            .property("path", SchemaBuilder::string())
+                            .property("secure", SchemaBuilder::boolean())
+                            .property("httpOnly", SchemaBuilder::boolean()),
+                    ).build(),
+                )
+                .example("Get Twitter cookies", json!({"domain": ".x.com"}))
+                .errors(&["EXTENSION_NOT_CONNECTED"]),
+
+            MethodInfo::new("notifications.create", "[Extension] Show desktop notification")
+                .schema(
+                    SchemaBuilder::object()
+                        .property(
+                            "title",
+                            SchemaBuilder::string().description("Notification title"),
+                        )
+                        .property(
+                            "message",
+                            SchemaBuilder::string().description("Notification message"),
+                        )
+                        .required(&["title", "message"])
+                        .build(),
+                )
+                .returns(
+                    SchemaBuilder::object()
+                        .property("notificationId", SchemaBuilder::string())
+                        .build(),
+                )
+                .example("Show notification", json!({"title": "Task Complete", "message": "Scraping finished"}))
+                .errors(&["EXTENSION_NOT_CONNECTED"]),
         ]
     }
 }

@@ -10,6 +10,7 @@
 //! ```
 //!
 //! # CHANGELOG (recent first, max 5 entries)
+//! 01/15/2026 - Added sync call_blocking() for service integration (Claude)
 //! 01/15/2026 - Initial implementation (Claude)
 
 use anyhow::{Context, Result};
@@ -168,6 +169,20 @@ impl ExtensionBridge {
         *self.state.read().await == ConnectionState::Connected
     }
 
+    /// Blocking version of is_connected() for use from synchronous code
+    pub fn is_connected_blocking(&self) -> bool {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| handle.block_on(self.is_connected()))
+            }
+            Err(_) => {
+                // Not in async context, check state directly (risky but okay for read)
+                // This is a best-effort check
+                false
+            }
+        }
+    }
+
     /// Send a request to the extension and wait for response
     pub async fn call(
         &self,
@@ -214,6 +229,40 @@ impl ExtensionBridge {
     /// Get the WebSocket port
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Blocking version of call() for use from synchronous code.
+    /// Uses tokio's Handle::block_on when called from outside async context.
+    pub fn call_blocking(
+        &self,
+        method: &str,
+        params: HashMap<String, serde_json::Value>,
+    ) -> Result<ExtensionResponse> {
+        // Try to get current tokio handle, otherwise create a new runtime
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // We're in an async context, use block_in_place
+                tokio::task::block_in_place(|| handle.block_on(self.call(method, params)))
+            }
+            Err(_) => {
+                // Not in async context, create a temporary runtime
+                let rt = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime for blocking call")?;
+                rt.block_on(self.call(method, params))
+            }
+        }
+    }
+
+    /// Convert ExtensionResponse to serde_json::Value for FGP protocol
+    pub fn response_to_value(response: ExtensionResponse) -> Result<serde_json::Value> {
+        if response.ok {
+            Ok(response.result.unwrap_or(serde_json::Value::Null))
+        } else {
+            Err(anyhow::anyhow!(
+                "Extension error: {}",
+                response.error.unwrap_or_else(|| "Unknown error".to_string())
+            ))
+        }
     }
 }
 
