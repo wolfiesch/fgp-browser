@@ -28,7 +28,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 
 use crate::browser::BrowserClient;
-use crate::extension_bridge::{is_extension_method, ExtensionBridge};
+use crate::extension_bridge::{extension_method_name, is_extension_method, ExtensionBridge};
 use crate::models::*;
 
 /// Browser automation service.
@@ -712,8 +712,10 @@ impl BrowserService {
             );
         }
 
-        tracing::debug!("Routing '{}' to Chrome extension", method);
-        let response = bridge.call_blocking(method, params)?;
+        // Strip 'browser.' prefix for the actual Chrome Extension API call
+        let ext_method = extension_method_name(method);
+        tracing::debug!("Routing '{}' to Chrome extension as '{}'", method, ext_method);
+        let response = bridge.call_blocking(ext_method, params)?;
         ExtensionBridge::response_to_value(response)
     }
 }
@@ -1237,7 +1239,7 @@ impl FgpService for BrowserService {
             // ================================================================
             // Extension Methods (requires Chrome extension)
             // ================================================================
-            MethodInfo::new("tabs.group", "[Extension] Group tabs together")
+            MethodInfo::new("browser.tabs.group", "[Extension] Group tabs together")
                 .schema(
                     SchemaBuilder::object()
                         .property(
@@ -1262,7 +1264,7 @@ impl FgpService for BrowserService {
                 .example("Group tabs", json!({"tabIds": [1, 2, 3]}))
                 .errors(&["EXTENSION_NOT_CONNECTED"]),
 
-            MethodInfo::new("tabGroups.update", "[Extension] Update tab group properties")
+            MethodInfo::new("browser.tabGroups.update", "[Extension] Update tab group properties")
                 .schema(
                     SchemaBuilder::object()
                         .property(
@@ -1294,7 +1296,7 @@ impl FgpService for BrowserService {
                 .example("Update group", json!({"groupId": 1, "title": "Research", "color": "blue"}))
                 .errors(&["EXTENSION_NOT_CONNECTED", "GROUP_NOT_FOUND"]),
 
-            MethodInfo::new("cookies.getAll", "[Extension] Get all cookies matching criteria")
+            MethodInfo::new("browser.cookies.getAll", "[Extension] Get all cookies matching criteria")
                 .schema(
                     SchemaBuilder::object()
                         .property(
@@ -1321,7 +1323,7 @@ impl FgpService for BrowserService {
                 .example("Get Twitter cookies", json!({"domain": ".x.com"}))
                 .errors(&["EXTENSION_NOT_CONNECTED"]),
 
-            MethodInfo::new("notifications.create", "[Extension] Show desktop notification")
+            MethodInfo::new("browser.notifications.create", "[Extension] Show desktop notification")
                 .schema(
                     SchemaBuilder::object()
                         .property(

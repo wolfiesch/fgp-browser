@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, RwLock};
@@ -53,23 +54,36 @@ pub enum ConnectionState {
 }
 
 /// Methods that should be routed to the extension (not CDP)
+/// These use `browser.` prefix to pass FGP namespace validation,
+/// but the actual Chrome Extension API method is extracted when calling.
 pub const EXTENSION_METHODS: &[&str] = &[
+    // Tab Management (for grouping workflow)
+    "browser.tabs.create",
+    "browser.tabs.query",
     // Tab Groups (CDP can't do this!)
-    "tabs.group",
-    "tabs.ungroup",
-    "tabGroups.update",
-    "tabGroups.query",
-    "tabGroups.collapse",
+    "browser.tabs.group",
+    "browser.tabs.ungroup",
+    "browser.tabGroups.update",
+    "browser.tabGroups.query",
+    "browser.tabGroups.collapse",
     // Cookies (cleaner API than CDP)
-    "cookies.get",
-    "cookies.getAll",
-    "cookies.set",
+    "browser.cookies.get",
+    "browser.cookies.getAll",
+    "browser.cookies.set",
     // Notifications (extension-only)
-    "notifications.create",
+    "browser.notifications.create",
     // Storage (extension-only)
-    "storage.get",
-    "storage.set",
+    "browser.storage.get",
+    "browser.storage.set",
+    // Utility
+    "browser.version",
 ];
+
+/// Extract the Chrome Extension API method from a browser.* method
+/// e.g., "browser.tabs.group" -> "tabs.group"
+pub fn extension_method_name(method: &str) -> &str {
+    method.strip_prefix("browser.").unwrap_or(method)
+}
 
 /// Check if a method should be handled by the extension
 pub fn is_extension_method(method: &str) -> bool {
@@ -80,6 +94,8 @@ pub fn is_extension_method(method: &str) -> bool {
 pub struct ExtensionBridge {
     /// Current connection state
     state: Arc<RwLock<ConnectionState>>,
+    /// Atomic flag for sync access to connection state
+    connected: Arc<AtomicBool>,
     /// Channel to send requests to extension
     request_tx: broadcast::Sender<ExtensionRequest>,
     /// Channel to receive responses from extension
@@ -99,6 +115,7 @@ impl ExtensionBridge {
 
         Self {
             state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
+            connected: Arc::new(AtomicBool::new(false)),
             request_tx,
             response_tx,
             response_rx: Arc::new(RwLock::new(response_rx)),
@@ -117,6 +134,7 @@ impl ExtensionBridge {
         tracing::info!("Extension bridge listening on ws://{}", addr);
 
         let state = self.state.clone();
+        let connected = self.connected.clone();
         let request_tx = self.request_tx.clone();
         let response_tx = self.response_tx.clone();
         let pending = self.pending.clone();
@@ -128,13 +146,14 @@ impl ExtensionBridge {
                     Ok((stream, peer)) => {
                         tracing::info!("Extension connected from {}", peer);
                         let state = state.clone();
+                        let connected = connected.clone();
                         let request_rx = request_tx.subscribe();
                         let response_tx = response_tx.clone();
                         let pending = pending.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) =
-                                handle_connection(stream, state, request_rx, response_tx, pending)
+                                handle_connection(stream, state, connected, request_rx, response_tx, pending)
                                     .await
                             {
                                 tracing::warn!("Extension connection error: {}", e);
@@ -170,17 +189,9 @@ impl ExtensionBridge {
     }
 
     /// Blocking version of is_connected() for use from synchronous code
+    /// Uses atomic bool for lock-free access
     pub fn is_connected_blocking(&self) -> bool {
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                tokio::task::block_in_place(|| handle.block_on(self.is_connected()))
-            }
-            Err(_) => {
-                // Not in async context, check state directly (risky but okay for read)
-                // This is a best-effort check
-                false
-            }
-        }
+        self.connected.load(Ordering::SeqCst)
     }
 
     /// Send a request to the extension and wait for response
@@ -270,6 +281,7 @@ impl ExtensionBridge {
 async fn handle_connection(
     stream: TcpStream,
     state: Arc<RwLock<ConnectionState>>,
+    connected: Arc<AtomicBool>,
     mut request_rx: broadcast::Receiver<ExtensionRequest>,
     response_tx: mpsc::Sender<ExtensionResponse>,
     _pending: Arc<RwLock<HashMap<String, tokio::sync::oneshot::Sender<ExtensionResponse>>>>,
@@ -280,8 +292,9 @@ async fn handle_connection(
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-    // Mark as connected
+    // Mark as connected (both async state and atomic flag)
     *state.write().await = ConnectionState::Connected;
+    connected.store(true, Ordering::SeqCst);
     tracing::info!("Extension WebSocket connected");
 
     // Handle incoming messages from extension
@@ -344,8 +357,9 @@ async fn handle_connection(
         _ = write_handle => {},
     }
 
-    // Mark as disconnected
+    // Mark as disconnected (both async state and atomic flag)
     *state.write().await = ConnectionState::Disconnected;
+    connected.store(false, Ordering::SeqCst);
     tracing::info!("Extension WebSocket disconnected");
 
     Ok(())
@@ -357,10 +371,17 @@ mod tests {
 
     #[test]
     fn test_is_extension_method() {
-        assert!(is_extension_method("tabs.group"));
-        assert!(is_extension_method("tabGroups.update"));
-        assert!(is_extension_method("cookies.getAll"));
+        assert!(is_extension_method("browser.tabs.group"));
+        assert!(is_extension_method("browser.tabGroups.update"));
+        assert!(is_extension_method("browser.cookies.getAll"));
         assert!(!is_extension_method("browser.open"));
         assert!(!is_extension_method("browser.snapshot"));
+    }
+
+    #[test]
+    fn test_extension_method_name() {
+        assert_eq!(extension_method_name("browser.tabs.group"), "tabs.group");
+        assert_eq!(extension_method_name("browser.cookies.getAll"), "cookies.getAll");
+        assert_eq!(extension_method_name("tabs.group"), "tabs.group"); // Already stripped
     }
 }

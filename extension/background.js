@@ -12,6 +12,7 @@ const FGP_WS_URL = 'ws://localhost:9223';  // FGP extension bridge port
 const RECONNECT_DELAY = 3000;
 const FGP_TAB_GROUP_NAME = 'FGP';
 const FGP_TAB_GROUP_COLOR = 'blue';
+const FGP_EXTENSION_VERSION = '0.1.1';  // Bump on protocol changes
 
 let ws = null;
 let fgpTabGroupId = null;
@@ -36,7 +37,7 @@ function connect() {
       updateBadge('connected');
 
       // Send hello message
-      send({ type: 'hello', version: '0.1.0', capabilities: getCapabilities() });
+      send({ type: 'hello', version: FGP_EXTENSION_VERSION, capabilities: getCapabilities() });
     };
 
     ws.onmessage = async (event) => {
@@ -157,9 +158,11 @@ async function handleRequest(request) {
 
     // === Utility ===
     case 'health':
-      return { ok: true, status: 'healthy' };
+      return { ok: true, result: { status: 'healthy' } };
     case 'capabilities':
-      return { ok: true, capabilities: getCapabilities() };
+      return { ok: true, result: getCapabilities() };
+    case 'version':
+      return { ok: true, result: { version: FGP_EXTENSION_VERSION } };
 
     default:
       return { ok: false, error: `Unknown method: ${method}` };
@@ -180,7 +183,7 @@ async function handleTabCreate(params) {
     await addTabToFgpGroup(tab.id);
   }
 
-  return { ok: true, tab: serializeTab(tab) };
+  return { ok: true, result: serializeTab(tab) };
 }
 
 async function handleTabUpdate(params) {
@@ -192,31 +195,31 @@ async function handleTabUpdate(params) {
   if (muted !== undefined) updates.muted = muted;
 
   const tab = await chrome.tabs.update(tabId, updates);
-  return { ok: true, tab: serializeTab(tab) };
+  return { ok: true, result: serializeTab(tab) };
 }
 
 async function handleTabRemove(params) {
   const { tabId, tabIds } = params;
   const ids = tabIds || [tabId];
   await chrome.tabs.remove(ids);
-  return { ok: true, removed: ids };
+  return { ok: true, result: { removed: ids } };
 }
 
 async function handleTabQuery(params) {
   const tabs = await chrome.tabs.query(params);
-  return { ok: true, tabs: tabs.map(serializeTab) };
+  return { ok: true, result: tabs.map(serializeTab) };
 }
 
 async function handleTabGet(params) {
   const { tabId } = params;
   const tab = await chrome.tabs.get(tabId);
-  return { ok: true, tab: serializeTab(tab) };
+  return { ok: true, result: serializeTab(tab) };
 }
 
 async function handleTabNavigate(params) {
   const { tabId, url } = params;
   const tab = await chrome.tabs.update(tabId, { url });
-  return { ok: true, tab: serializeTab(tab) };
+  return { ok: true, result: serializeTab(tab) };
 }
 
 // ============================================================================
@@ -231,7 +234,7 @@ async function handleTabGroup(params) {
   if (createProperties) options.createProperties = createProperties;
 
   const resultGroupId = await chrome.tabs.group(options);
-  return { ok: true, groupId: resultGroupId };
+  return { ok: true, result: { groupId: resultGroupId } };
 }
 
 async function handleTabUngroup(params) {
@@ -248,12 +251,12 @@ async function handleTabGroupUpdate(params) {
   if (collapsed !== undefined) updates.collapsed = collapsed;
 
   const group = await chrome.tabGroups.update(groupId, updates);
-  return { ok: true, group };
+  return { ok: true, result: group };
 }
 
 async function handleTabGroupQuery(params) {
   const groups = await chrome.tabGroups.query(params);
-  return { ok: true, groups };
+  return { ok: true, result: groups };
 }
 
 async function handleTabGroupCollapse(params) {
@@ -302,7 +305,7 @@ async function handleExecuteScript(params) {
     args
   });
 
-  return { ok: true, results: results.map(r => r.result) };
+  return { ok: true, result: results.map(r => r.result) };
 }
 
 async function handlePageSnapshot(params) {
@@ -314,7 +317,7 @@ async function handlePageSnapshot(params) {
     func: extractAriaTree
   });
 
-  return { ok: true, snapshot: results[0]?.result };
+  return { ok: true, result: results[0]?.result };
 }
 
 async function handlePageClick(params) {
@@ -331,7 +334,7 @@ async function handlePageClick(params) {
     args: [selector]
   });
 
-  return { ok: true, clicked: results[0]?.result };
+  return { ok: true, result: { clicked: results[0]?.result } };
 }
 
 async function handlePageFill(params) {
@@ -350,7 +353,7 @@ async function handlePageFill(params) {
     args: [selector, value]
   });
 
-  return { ok: true, filled: results[0]?.result };
+  return { ok: true, result: { filled: results[0]?.result } };
 }
 
 // ============================================================================
@@ -360,17 +363,17 @@ async function handlePageFill(params) {
 async function handleCookiesGet(params) {
   const { url, name } = params;
   const cookie = await chrome.cookies.get({ url, name });
-  return { ok: true, cookie };
+  return { ok: true, result: cookie };
 }
 
 async function handleCookiesGetAll(params) {
   const cookies = await chrome.cookies.getAll(params);
-  return { ok: true, cookies };
+  return { ok: true, result: cookies };
 }
 
 async function handleCookiesSet(params) {
   const cookie = await chrome.cookies.set(params);
-  return { ok: true, cookie };
+  return { ok: true, result: cookie };
 }
 
 // ============================================================================
@@ -381,7 +384,7 @@ async function handleStorageGet(params) {
   const { keys, area = 'local' } = params;
   const storage = area === 'sync' ? chrome.storage.sync : chrome.storage.local;
   const data = await storage.get(keys);
-  return { ok: true, data };
+  return { ok: true, result: data };
 }
 
 async function handleStorageSet(params) {
@@ -403,7 +406,7 @@ async function handleNotificationCreate(params) {
     title,
     message
   });
-  return { ok: true, notificationId: id };
+  return { ok: true, result: { notificationId: id } };
 }
 
 // ============================================================================
@@ -471,6 +474,29 @@ function extractAriaTree() {
 
   return { nodes, element_count: nodes.length };
 }
+
+// ============================================================================
+// Internal Message Handler (for popup communication)
+// ============================================================================
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'getStatus') {
+    sendResponse({ status: connectionStatus });
+    return true;
+  }
+
+  if (message.type === 'reconnect') {
+    if (ws) {
+      ws.close();
+    }
+    ws = null;
+    connect();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  return false;
+});
 
 // ============================================================================
 // Initialize

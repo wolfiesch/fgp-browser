@@ -361,6 +361,34 @@ fn with_session(mut params: serde_json::Value, session: Option<String>) -> serde
     params
 }
 
+#[cfg(test)]
+mod tests {
+    use super::with_session;
+    use serde_json::json;
+
+    #[test]
+    fn with_session_inserts_into_object() {
+        let params = json!({ "url": "https://example.com" });
+        let updated = with_session(params, Some("sess-1".to_string()));
+        assert_eq!(updated["session_id"], "sess-1");
+        assert_eq!(updated["url"], "https://example.com");
+    }
+
+    #[test]
+    fn with_session_replaces_non_object() {
+        let params = json!("not-an-object");
+        let updated = with_session(params, Some("sess-2".to_string()));
+        assert_eq!(updated, json!({ "session_id": "sess-2" }));
+    }
+
+    #[test]
+    fn with_session_noop_when_missing() {
+        let params = json!({ "url": "https://example.com" });
+        let updated = with_session(params.clone(), None);
+        assert_eq!(updated, params);
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -551,30 +579,59 @@ fn main() -> Result<()> {
                 color,
                 socket,
             } => {
-                let mut params = serde_json::json!({"tabIds": tab_ids});
-                if let Some(t) = title {
-                    params.as_object_mut().unwrap().insert("title".to_string(), serde_json::json!(t));
+                // Step 1: Create the group
+                let params = serde_json::json!({"tabIds": tab_ids});
+                let response = call_daemon_raw(&socket, "browser.tabs.group", params)?;
+
+                // Extract groupId from response
+                let group_id = response
+                    .get("result")
+                    .and_then(|r| r.get("groupId"))
+                    .and_then(|g| g.as_i64());
+
+                // Step 2: Update title/color if provided
+                if let Some(gid) = group_id {
+                    if title.is_some() || color.is_some() {
+                        let mut update_params = serde_json::json!({"groupId": gid});
+                        if let Some(t) = &title {
+                            update_params.as_object_mut().unwrap().insert("title".to_string(), serde_json::json!(t));
+                        }
+                        if let Some(c) = &color {
+                            update_params.as_object_mut().unwrap().insert("color".to_string(), serde_json::json!(c));
+                        }
+                        let final_response = call_daemon_raw(&socket, "browser.tabGroups.update", update_params)?;
+                        if cli.json {
+                            println!("{}", serde_json::to_string(&final_response)?);
+                        } else {
+                            println!("{}", final_response.get("result").unwrap_or(&serde_json::Value::Null));
+                        }
+                        return Ok(());
+                    }
                 }
-                if let Some(c) = color {
-                    params.as_object_mut().unwrap().insert("color".to_string(), serde_json::json!(c));
+
+                // No update needed, just print the group response
+                if cli.json {
+                    println!("{}", serde_json::to_string(&response)?);
+                } else {
+                    println!("{}", response.get("result").unwrap_or(&serde_json::Value::Null));
                 }
-                cmd_call_daemon(&socket, "tabs.group", params, cli.json)
+                Ok(())
             }
             ExtensionAction::Ungroup { tab_ids, socket } => cmd_call_daemon(
                 &socket,
-                "tabs.ungroup",
+                "browser.tabs.ungroup",
                 serde_json::json!({"tabIds": tab_ids}),
                 cli.json,
             ),
             ExtensionAction::ListGroups { socket } => cmd_call_daemon(
                 &socket,
-                "tabGroups.query",
+                "browser.tabGroups.query",
                 serde_json::json!({}),
                 cli.json,
             ),
             ExtensionAction::Cookies { domain, socket } => cmd_call_daemon(
                 &socket,
-                "cookies.getAll",
+                "browser.cookies.getAll",
                 serde_json::json!({"domain": domain}),
                 cli.json,
             ),
@@ -584,7 +641,7 @@ fn main() -> Result<()> {
                 socket,
             } => cmd_call_daemon(
                 &socket,
-                "notifications.create",
+                "browser.notifications.create",
                 serde_json::json!({"title": title, "message": message}),
                 cli.json,
             ),
@@ -788,6 +845,42 @@ fn cmd_status(socket: String) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Call daemon and return parsed JSON response
+fn call_daemon_raw(
+    socket: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let socket_path = shellexpand::tilde(socket).to_string();
+
+    let mut stream = UnixStream::connect(&socket_path)
+        .context("Failed to connect to daemon. Is it running? Try: browser-gateway start")?;
+
+    let request = serde_json::json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "v": 1,
+        "method": method,
+        "params": params,
+    });
+
+    writeln!(stream, "{}", request)?;
+    stream.flush()?;
+
+    let mut reader = BufReader::new(stream);
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+
+    let parsed: serde_json::Value = serde_json::from_str(&response)
+        .context("Failed to parse daemon response")?;
+
+    // Check for error
+    if let Some(error) = parsed.get("error") {
+        anyhow::bail!("Daemon error: {}", error);
+    }
+
+    Ok(parsed)
 }
 
 fn cmd_call_daemon(
